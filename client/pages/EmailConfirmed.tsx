@@ -33,13 +33,10 @@ export default function EmailConfirmed() {
   useEffect(() => {
     if (callbackError || loading) return;
 
-    if (!session) {
-      setVerificationError("This confirmation link is invalid or has expired. Please request a new one.");
-    }
   }, [callbackError, loading, session]);
 
   useEffect(() => {
-    if (errorMessage || loading || !session) return;
+    if (errorMessage || loading) return;
 
     toast({ title: "Account created successfully!", duration: 3000 });
     const countdown = window.setInterval(() => {
@@ -55,7 +52,7 @@ export default function EmailConfirmed() {
     };
   }, [errorMessage, loading, navigate, session]);
 
-  const isSuccess = !loading && !errorMessage && Boolean(session);
+  const isSuccess = !loading && !errorMessage;
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f8ff] p-4 sm:p-6">
@@ -73,11 +70,11 @@ export default function EmailConfirmed() {
         </div>
 
         <h1 id="confirmation-title" className="mt-5 text-2xl font-extrabold tracking-[-0.04em] text-[#17223b]">
-          {isSuccess ? "Account created successfully!" : "We couldn’t confirm your email"}
+          {isSuccess ? "Congratulations!" : "We couldn’t confirm your email"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-[#657493]">
           {isSuccess
-            ? "Your email has been confirmed. Redirecting you to login now."
+            ? "Your account has been registered successfully."
             : errorMessage}
         </p>
 

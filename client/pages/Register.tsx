@@ -36,12 +36,9 @@ export default function Register() {
       setErrorMessage(error?.message ?? "Unable to create your account.");
       return;
     }
-    if (data.session) {
-      await supabase.from("login_activity").insert({ user_id: data.user.id, email, action: "registration" });
-      navigate("/dashboard");
-    } else {
-      setErrorMessage("Check your email to confirm your account before logging in.");
-    }
+    await supabase.from("login_activity").insert({ user_id: data.user.id, email, action: "registration" });
+    if (data.session) await supabase.auth.signOut();
+    setErrorMessage("Check your email to confirm your account before logging in.");
   };
   return (
     <main className="flex min-h-screen bg-[#f7f9fc]">
@@ -56,8 +53,8 @@ export default function Register() {
           </p>
           <div className="mt-6 space-y-3 text-sm text-blue-100">
             <p className="flex items-center gap-2">
-              <Check size={15} className="text-[#5de1d3]" /> 200,000 free
-              verification credits
+              <Check size={15} className="text-[#5de1d3]" /> Paid monthly
+              subscription credits
             </p>
             <p className="flex items-center gap-2">
               <Check size={15} className="text-[#5de1d3]" /> Upload CSV, XLSX,
@@ -88,7 +85,7 @@ export default function Register() {
             Create your account
           </h1>
           <p className="mt-2 text-sm text-[#71809d]">
-            Start verifying email lists for free today.
+            Register your account, confirm your email, and wait for administrator approval.
           </p>
           <form onSubmit={submit} className="mt-8 space-y-4">
             <label className="block text-xs font-bold text-[#42516d]">
