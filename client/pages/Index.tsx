@@ -26,15 +26,15 @@ import { supabase } from "@/lib/supabase";
 type CheckResult = { status: "valid" | "invalid" | "risky"; message: string };
 type VerificationStatus = "verified" | "invalid" | "error" | "unknown";
 type VerificationRow = { email: string; status: VerificationStatus };
-type PurchaseStatus = {
+type Subscription = {
   id: string;
-  package_id: string;
-  credit_amount: number;
-  amount: number;
-  currency: string;
   status: string;
-  rejection_reason: string | null;
-  created_at: string;
+  billing_period: string;
+  expiry_date: string | null;
+  credits_allocated: number;
+  credits_used: number;
+  credits_remaining: number;
+  subscription_plans: { name: string } | null;
 };
 
 function inspectEmail(value: string): CheckResult | null {
@@ -101,80 +101,56 @@ export default function Index() {
   const [fileError, setFileError] = useState("");
   const [rows, setRows] = useState<VerificationRow[]>([]);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [credits, setCredits] = useState(0);
-  const [extraCredits, setExtraCredits] = useState(0);
-  const [baseCredits, setBaseCredits] = useState(200000);
-  const [purchases, setPurchases] = useState<PurchaseStatus[]>([]);
   const [showZeroCredits, setShowZeroCredits] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { user, profile, loading } = useAuth();
   const result = useMemo(() => inspectEmail(checkedEmail), [checkedEmail]);
 
-  const hasWorkspaceAccess = profile?.role === "admin" || profile?.access_status === "approved";
+  const hasWorkspaceAccess = profile?.access_status === "approved";
 
-  const loadCreditBalance = useCallback(async () => {
-    if (!user || !hasWorkspaceAccess) return;
+  const loadSubscription = useCallback(async () => {
+    if (!user) return;
     const { data } = await supabase
-      .from("credits")
-      .select("remaining,base_credits,extra_credits")
+      .from("subscriptions")
+      .select("id,status,billing_period,expiry_date,credits_allocated,credits_used,credits_remaining,subscription_plans(name)")
       .eq("user_id", user.id)
-      .single();
-    if (!data) return;
-    setCredits(data.remaining);
-    setBaseCredits(data.base_credits);
-    setExtraCredits(data.extra_credits);
-  }, [user, hasWorkspaceAccess]);
+      .eq("status", "active")
+      .order("expiry_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextSubscription = data as Subscription | null;
+    if (!nextSubscription || !nextSubscription.expiry_date || new Date(nextSubscription.expiry_date) <= new Date()) {
+      setSubscription(null);
+      setCredits(0);
+      return;
+    }
+    setSubscription(nextSubscription);
+    setCredits(nextSubscription.credits_remaining);
+  }, [user]);
 
   useEffect(() => {
     if (!loading && !user) navigate("/login", { replace: true });
-    void loadCreditBalance();
-    const refreshTimer = window.setInterval(() => void loadCreditBalance(), 10000);
+    void loadSubscription();
+    const refreshTimer = window.setInterval(() => void loadSubscription(), 30000);
     const creditChannel = user
       ? supabase
-          .channel(`credit-balance-${user.id}`)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "credits", filter: `user_id=eq.${user.id}` }, () => void loadCreditBalance())
+          .channel(`subscription-balance-${user.id}`)
+          .on("postgres_changes", { event: "*", schema: "public", table: "subscriptions", filter: `user_id=eq.${user.id}` }, () => void loadSubscription())
           .subscribe()
       : null;
     return () => {
       window.clearInterval(refreshTimer);
       if (creditChannel) void supabase.removeChannel(creditChannel);
     };
-  }, [loading, user, navigate, loadCreditBalance]);
-
-  useEffect(() => {
-    if (!user) return;
-    const loadPurchases = async () => {
-      const { data } = await supabase
-        .from("purchases")
-        .select("id,package_id,credit_amount,amount,currency,status,rejection_reason,created_at")
-        .order("created_at", { ascending: false })
-        .limit(3);
-      setPurchases((data ?? []) as PurchaseStatus[]);
-    };
-    void loadPurchases();
-    const purchaseChannel = supabase
-      .channel(`purchase-status-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchases", filter: `user_id=eq.${user.id}` }, loadPurchases)
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(purchaseChannel);
-    };
-  }, [user]);
+  }, [loading, user, navigate, loadSubscription]);
 
   const hasRemainingCredits = async () => {
-    if (!user || !hasWorkspaceAccess) return false;
-    const { data } = await supabase
-      .from("credits")
-      .select("remaining,base_credits,extra_credits")
-      .eq("user_id", user.id)
-      .single();
-
-    if (!data) return false;
-    setCredits(data.remaining);
-    setBaseCredits(data.base_credits);
-    setExtraCredits(data.extra_credits);
-    if (data.remaining <= 0) {
+    if (!user || !hasWorkspaceAccess || !subscription) return false;
+    await loadSubscription();
+    if (credits <= 0) {
       setShowZeroCredits(true);
       return false;
     }
@@ -182,12 +158,12 @@ export default function Index() {
   };
 
   const refreshCreditsAfterFailedDeduction = async () => {
-    await hasRemainingCredits();
+    await loadSubscription();
   };
 
   const checkEmail = async () => {
     if (!email.trim() || !(await hasRemainingCredits())) return;
-    const { data, error } = await supabase.rpc("consume_credits", { amount: 1 });
+    const { data, error } = await supabase.rpc("consume_subscription_credits", { amount: 1 });
     if (error || !data) {
       await refreshCreditsAfterFailedDeduction();
       return;
@@ -224,7 +200,7 @@ export default function Index() {
       email: value,
       status: classifyEmail(value),
     }));
-    const { data, error } = await supabase.rpc("consume_credits", { amount: nextRows.length });
+    const { data, error } = await supabase.rpc("consume_subscription_credits", { amount: nextRows.length });
     if (!error && data) {
       setRows(nextRows);
       setCredits(data.remaining);
